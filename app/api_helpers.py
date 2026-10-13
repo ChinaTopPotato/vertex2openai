@@ -217,7 +217,8 @@ def create_generation_config(request: OpenAIRequest) -> Dict[str, Any]:
     # 官方并未禁止生图模型使用系统指令，但为避免直接改变既有行为，
     # 改成控制台开关 image_system_instruction（默认关，保持旧行为）。
     if system_texts:
-        _is_image_name = "image" in request.model.lower()
+        # 生图判定统一走能力档案（"nano-banana" 家族名字里不带 image，裸 "image" in 会漏判）
+        _is_image_name = mc.get_profile(request.model)["is_image"]
         _allow_sys = (not _is_image_name) or bool(
             app_state.get_setting("image_system_instruction", False))
         if _allow_sys:
@@ -318,6 +319,19 @@ def create_generation_config(request: OpenAIRequest) -> Dict[str, Any]:
 
     if is_image_model:
         config["response_modalities"] = ["TEXT", "IMAGE"]
+
+        # Nano Banana 家族专属（用户决策 2026-10-13）：
+        # - 追加 4 个图像安全分类，阈值全 OFF（官方示例基准）
+        # - media_resolution=HIGH：提升输入多媒体的理解精细度（非输出尺寸）
+        # 旧生图模型维持现状，不加。
+        if "nano-banana" in (request.model or "").lower():
+            config["safety_settings"].extend([
+                types.SafetySetting(category="HARM_CATEGORY_IMAGE_HATE", threshold="OFF"),
+                types.SafetySetting(category="HARM_CATEGORY_IMAGE_DANGEROUS_CONTENT", threshold="OFF"),
+                types.SafetySetting(category="HARM_CATEGORY_IMAGE_HARASSMENT", threshold="OFF"),
+                types.SafetySetting(category="HARM_CATEGORY_IMAGE_SEXUALLY_EXPLICIT", threshold="OFF"),
+            ])
+            config["media_resolution"] = types.MediaResolution.MEDIA_RESOLUTION_HIGH
 
         # 宽高比：两通道共用解析（请求额外字段 > OpenAI size 映射 > 提示词 > 控制台默认，按模型白名单校验）
         target_ar = mc.resolve_aspect_ratio(request.model, request, settings)
@@ -951,7 +965,9 @@ async def execute_gemini_call(
             return False
 
     if request_obj.stream:
-        is_image_request = "image" in request_obj.model.lower()
+        # 生图判定统一走能力档案（nano-banana-2.1 名字里不带 image，裸 "image" in 会漏判，
+        # 漏判会绕开下面的生图假流式保护，走真流式）
+        is_image_request = mc.get_profile(request_obj.model)["is_image"]
 
         if app_state.get_setting("fake_streaming", app_config.FAKE_STREAMING_ENABLED) or is_image_request:
             if is_image_request:
