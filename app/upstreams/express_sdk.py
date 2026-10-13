@@ -17,7 +17,7 @@ from api_helpers import (
 )
 from message_processing import (create_gemini_prompt, apply_prefill_compat,
                                 apply_console_injection, DEFAULT_IMAGE_PREFILL_NUDGE)
-from http_options import get_http_options, should_use_priority_paygo
+from http_options import get_http_options
 import model_capabilities as mc
 from runtime_state import app_state
 import config as app_config
@@ -62,10 +62,8 @@ def _prefill_tpl(user_template: str, is_image_model: bool) -> str:
 
 def _build_thinking_config(base_model_name: str, request: OpenAIRequest, is_image_model: bool,
                            prefill_active: bool = False) -> dict | None:
-    """按模型能力档案 + 控制台设置 + 单次请求构建思考配置（SDK 线格式）。"""
-    if is_image_model:
-        return None
-
+    """按模型能力档案 + 控制台设置 + 单次请求构建思考配置（SDK 线格式）。
+    生图模型同样下发 thinking_level（三模型默认 HIGH，用户决策 2026-10-13）。"""
     settings = app_state.get_effective_settings(base_model_name)
     t = mc.resolve_thinking(base_model_name, request, settings, prefill_active=prefill_active)
     if t.get("mode") is None:
@@ -85,8 +83,6 @@ def _build_thinking_config(base_model_name: str, request: OpenAIRequest, is_imag
             thinking_config["thinking_level"] = t["level"]
         else:
             print(f"⚠️ [推理配置] 当前 google-genai 版本 {genai_version_str} 不支持 thinking_level，已自动跳过该参数。")
-    else:  # budget（Gemini 2.5）
-        thinking_config["thinking_budget"] = t["budget"]
 
     if app_state.get_setting("debug_outbound", False):
         print(f"🔎 [出站调试] Express 通道 模型={base_model_name} thinkingConfig={thinking_config}")
@@ -227,21 +223,15 @@ class ExpressSDKUpstream(BaseUpstream):
         # 多账号：location 钉定用**这个 Key 自己的**项目，而不是 Cookie 通道的全局项目
         model_to_call = resolve_express_model_path(base_model_name, _inj_settings,
                                                    key_project_id=key_record.get("project_id", ""))
-        priority_paygo = should_use_priority_paygo(model_to_call)
-
         client_to_use = genai.Client(
             vertexai=True,
             api_key=express_api_key,
-            http_options=get_http_options(priority_paygo=priority_paygo),
+            http_options=get_http_options(),
         )
         _log_resolved_endpoint(client_to_use)
         print(f"🌐 [上游端点] 使用官方 Gemini Express Mode SDK 调用模型 {base_model_name}。")
         if model_to_call != base_model_name:
             print(f"🌐 [上游端点] 已钉定 location：{model_to_call}")
-        if priority_paygo:
-            print("🚦 [流量等级] global 请求已附加 Priority PayGo 请求头；实际是否命中以上游 traffic_type 为准。")
-        else:
-            print("ℹ️ [流量等级] 当前未钉定 global，使用普通请求。")
 
         profile = mc.get_profile(base_model_name)
         is_image_model = profile["is_image"]
@@ -320,13 +310,13 @@ class ExpressSDKUpstream(BaseUpstream):
             client_to_use, model_to_call, prompt_func, gen_config_dict, request_obj,
             fastapi_request=fastapi_request, prefill_text=prefill_text,
             # 钉定路径万一不对（Project ID 与 Key 不同项目、该区域没有此模型），
-            # 自动退回裸模型名重试一次，并改用不带 Priority 请求头的普通客户端。
+            # 自动退回裸模型名重试一次。
             fallback_model=(base_model_name if model_to_call != base_model_name else None),
             fallback_client_factory=(
                 lambda: genai.Client(
                     vertexai=True,
                     api_key=express_api_key,
-                    http_options=get_http_options(priority_paygo=False),
+                    http_options=get_http_options(),
                 )
-            ) if priority_paygo else None,
+            ),
         )
