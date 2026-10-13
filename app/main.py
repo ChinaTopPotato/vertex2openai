@@ -450,10 +450,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           <div class="lbl mb-1">Gemini 3.x 思考档位（thinking_level）</div>
           <select id="thinking_g3_level" class="inp"><option value="">自动（按模型默认）</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
         </div>
-        <div id="wrap-g25budget">
-          <div class="lbl mb-1">Gemini 2.5 思考预算（thinking_budget，-1=动态，0=关闭*）</div>
-          <input id="thinking_g25_budget" type="number" class="inp" placeholder="-1">
-        </div>
         <p id="think-note" class="text-xs text-neutral-500 mt-2"></p>
         <div class="mt-3 pt-3 border-t border-neutral-100">
           <div class="lbl mb-1">原生思考控制（native_thinking_mode）</div>
@@ -708,7 +704,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 const $ = id => document.getElementById(id);
 let CAPS = {}, chart = null, curAR = "";
 let GLOBAL_SETTINGS = {}, OVERRIDES = {};
-const PER_MODEL_KEYS = ['native_thinking_mode','thinking_g3_level','thinking_g25_budget','image_size','image_aspect_ratio','default_temperature','default_top_p','default_max_tokens','inject_system_instruction','inject_prefill','prefill_instruction','image_system_instruction','inject_prefill_for_image','sampling_policy','prefill_cot_guard'];
+const PER_MODEL_KEYS = ['native_thinking_mode','thinking_g3_level','image_size','image_aspect_ratio','default_temperature','default_top_p','default_max_tokens','inject_system_instruction','inject_prefill','prefill_instruction','image_system_instruction','inject_prefill_for_image','sampling_policy','prefill_cot_guard'];
 const COMMON_ARS = ["1:1","3:2","2:3","3:4","4:3","4:5","5:4","9:16","16:9","21:9","1:4","4:1","1:8","8:1","9:21"];
 
 function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
@@ -878,7 +874,7 @@ async function loadParams(){
     const s=await (await fetch('/api/settings')).json();
     GLOBAL_SETTINGS=s;
     curAR = s.image_aspect_ratio || "";
-    ['native_thinking_mode','thinking_g3_level','thinking_g25_budget','image_size','default_temperature','default_top_p','default_max_tokens','img_compress_max_dim','img_compress_max_mb','img_compress_quality','retry_max','retry_backoff_seconds','fake_streaming_interval','prefill_mode','prefill_instruction','inject_system_instruction','inject_prefill','sampling_policy','express_location','resumable_ttl_seconds','resumable_max_streams'].forEach(k=>setV(k,s[k]));
+    ['native_thinking_mode','thinking_g3_level','image_size','default_temperature','default_top_p','default_max_tokens','img_compress_max_dim','img_compress_max_mb','img_compress_quality','retry_max','retry_backoff_seconds','fake_streaming_interval','prefill_mode','prefill_instruction','inject_system_instruction','inject_prefill','sampling_policy','express_location','resumable_ttl_seconds','resumable_max_streams'].forEach(k=>setV(k,s[k]));
     ['img_compress_enabled','fake_streaming','roundrobin','safety_score','cookie_debug','debug_outbound','prefill_suppress_thinking','image_system_instruction','inject_prefill_for_image','prefill_cot_guard','resumable_enabled'].forEach(k=>setV(k,s[k]));
     // 向后兼容：旧版布尔开关映射到新的 native_thinking_mode 下拉
     if((!s.native_thinking_mode || s.native_thinking_mode==='request')){
@@ -920,7 +916,6 @@ async function saveModelOverride(){
   const patch={
     native_thinking_mode:$('native_thinking_mode').value,
     thinking_g3_level:$('thinking_g3_level').value,
-    thinking_g25_budget:numOr('thinking_g25_budget',-1),
     image_size:$('image_size').value,
     image_aspect_ratio:$('image_aspect_ratio').value,
     default_temperature:numOrNull('default_temperature'),
@@ -976,8 +971,8 @@ function renderCaps(){
   if(m==='__global__'){
     applyModelParamFields(m);
     $('caps-summary').innerHTML='<span class="text-xs text-neutral-500">全局默认作用域：下面的值对所有未设 ★ 专属的模型生效。切到具体模型可查看该模型的能力与专属值。</span>';
-    ['thinking_g3_level','thinking_g25_budget','image_size','image_aspect_ratio'].forEach(id=>{const el=$(id); if(el) el.disabled=false;});
-    $('wrap-g3level').style.opacity='1'; $('wrap-g25budget').style.opacity='1';
+    ['thinking_g3_level','image_size','image_aspect_ratio'].forEach(id=>{const el=$(id); if(el) el.disabled=false;});
+    $('wrap-g3level').style.opacity='1';
     $('think-note').textContent='全局默认：具体下发时仍按各模型能力自动裁剪（例如 Pro 上 minimal 会就近取 low）。';
     $('image-note').textContent='全局默认：仅生图模型会用到。';
     $('sampling-note').textContent='全局默认：已废弃采样参数的模型会自动剥离。';
@@ -988,7 +983,6 @@ function renderCaps(){
   const th=cap.thinking||{};
   let sum=[chip('家族 '+cap.family, true)];
   if(th.kind==='level') sum.push(chip('思考档位 '+(th.levels||[]).join(' / ')));
-  else if(th.kind==='budget') sum.push(chip('思考预算 '+th.budget_min+'~'+th.budget_max));
   else sum.push(chip('无思考调节'));
   if(cap.is_image){
     sum.push(chip('分辨率 '+cap.image_sizes.join('/')));
@@ -1001,15 +995,12 @@ function renderCaps(){
   if(cap.supports_search) sum.push(chip('支持搜索'));
   $('caps-summary').innerHTML=sum.join('');
 
-  const isLevel=th.kind==='level', isBudget=th.kind==='budget';
+  const isLevel=th.kind==='level';
   $('thinking_g3_level').disabled=!isLevel;
-  $('thinking_g25_budget').disabled=!isBudget;
   $('wrap-g3level').style.opacity=isLevel?'1':'.4';
-  $('wrap-g25budget').style.opacity=isBudget?'1':'.4';
   let tn='';
-  if(cap.is_image) tn='生图模型不接受思考参数（模型内部自行思考）。';
+  if(cap.is_image) tn='生图模型思考档位（默认 high，可在上方调整）。';
   else if(isLevel) tn='该模型用思考档位' + ((th.levels && !th.levels.includes('minimal')) ? '（此模型最低 low，无 minimal，且无法关闭）' : '（无法完全关闭，最省为 minimal）') + '。';
-  else if(isBudget) tn=(cap.family==='g25' && m.includes('pro')) ? '2.5 Pro 最低预算 128，无法设 0 关闭；-1 为动态。' : '2.5 Flash 可设 0 关闭思考，-1 为动态。';
   else tn='该模型不支持思考调节。';
   $('think-note').textContent=tn;
 
