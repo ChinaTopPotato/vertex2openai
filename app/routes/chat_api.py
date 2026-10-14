@@ -11,6 +11,7 @@ from runtime_state import app_state
 from upstreams.express_sdk import ExpressSDKUpstream
 from upstreams.cookie_proxy import CookieProxyUpstream
 from api_helpers import extract_upstream_error, create_openai_error_response
+from proxy_pool import proxy_pool
 
 # 第二轮：弱网可靠传输 —— 服务端响应缓冲 + 序列号事件 + 断线重放 / 分片轮询。
 # 上游的读取由后台泵任务驱动，与前端连接解绑；Google 的回复总能完整落缓冲，
@@ -36,10 +37,8 @@ cookie_upstream = CookieProxyUpstream()
 
 async def _call_upstream(request_obj: OpenAIRequest, fastapi_request: Request):
     """按控制台开关分流到两条上游通道（与原来完全一致）。"""
-    if app_state.is_web_proxy_enabled():
-        return await cookie_upstream.chat_completions(request_obj, fastapi_request)
-    else:
-        return await express_upstream.chat_completions(request_obj, fastapi_request)
+    upstream = cookie_upstream if app_state.is_web_proxy_enabled() else express_upstream
+    return await proxy_pool.call(lambda: upstream.chat_completions(request_obj, fastapi_request))
 
 
 def _request_fingerprint(request_obj: OpenAIRequest) -> str:

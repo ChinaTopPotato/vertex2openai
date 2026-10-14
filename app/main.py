@@ -22,6 +22,9 @@ from model_loader import get_express_models
 from cookie_auth import validate_cookie
 import express_key_probe
 from resumable import resumable_store
+from proxy_pool import proxy_pool
+from proxy_pool_api import install_proxy_pool_routes
+from proxy_pool_ui import install_proxy_pool_ui
 
 express_key_manager = ExpressKeyManager()
 
@@ -65,6 +68,7 @@ async def lifespan(app: FastAPI):
         print("⚠️ [密钥配置] 未配置任何 Express API Key（控制台「通道与凭证」页可随时添加）。"
               "若不启用 Cookie 直连模式，聊天请求将会报错。")
     await refresh_models_config_cache()
+    await proxy_pool.startup()
 
     # 启动时自动探测各 Key 归属的 GCP Project ID（location 钉定要用）。
     # 放后台任务里跑：探测走外网，绝不能阻塞服务启动。
@@ -78,6 +82,7 @@ async def lifespan(app: FastAPI):
             if not _t.done():
                 _t.cancel()
         resumable_store.cancel_all_pumps()
+        await proxy_pool.shutdown()
 
 app = FastAPI(title="agentplatform2api", lifespan=lifespan)
 
@@ -1093,6 +1098,10 @@ fetchStats(); setInterval(fetchStats,3000); loadRuntime(); loadParams(); loadExp
 </body>
 </html>
 """
+
+
+DASHBOARD_HTML = install_proxy_pool_ui(DASHBOARD_HTML)
+install_proxy_pool_routes(app, require_auth)
 
 
 @app.get("/", response_class=HTMLResponse)

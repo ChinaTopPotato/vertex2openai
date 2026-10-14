@@ -18,6 +18,7 @@ from api_helpers import (
 from message_processing import (create_gemini_prompt, apply_prefill_compat,
                                 apply_console_injection, DEFAULT_IMAGE_PREFILL_NUDGE)
 from http_options import get_http_options
+from proxy_pool import register_request_cleanup
 import model_capabilities as mc
 from runtime_state import app_state
 import config as app_config
@@ -223,11 +224,21 @@ class ExpressSDKUpstream(BaseUpstream):
         # 多账号：location 钉定用**这个 Key 自己的**项目，而不是 Cookie 通道的全局项目
         model_to_call = resolve_express_model_path(base_model_name, _inj_settings,
                                                    key_project_id=key_record.get("project_id", ""))
-        client_to_use = genai.Client(
-            vertexai=True,
-            api_key=express_api_key,
-            http_options=get_http_options(),
-        )
+        def new_client():
+            client = genai.Client(
+                vertexai=True,
+                api_key=express_api_key,
+                http_options=get_http_options(),
+            )
+            async def close_client():
+                try:
+                    await client.aio.aclose()
+                finally:
+                    client.close()
+            register_request_cleanup(close_client)
+            return client
+
+        client_to_use = new_client()
         _log_resolved_endpoint(client_to_use)
         print(f"🌐 [上游端点] 使用官方 Gemini Express Mode SDK 调用模型 {base_model_name}。")
         if model_to_call != base_model_name:
@@ -312,11 +323,5 @@ class ExpressSDKUpstream(BaseUpstream):
             # 钉定路径万一不对（Project ID 与 Key 不同项目、该区域没有此模型），
             # 自动退回裸模型名重试一次。
             fallback_model=(base_model_name if model_to_call != base_model_name else None),
-            fallback_client_factory=(
-                lambda: genai.Client(
-                    vertexai=True,
-                    api_key=express_api_key,
-                    http_options=get_http_options(),
-                )
-            ),
+            fallback_client_factory=new_client,
         )

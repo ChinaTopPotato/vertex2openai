@@ -125,6 +125,8 @@ credentials/
 # 运行态持久化文件（包含控制台保存的 Cookie / Project ID 等敏感信息，严禁入库）
 web_state.json
 app/web_state.json
+# Subscription proxy runtime files contain subscription URLs and node credentials.
+proxy_pool/
 # If you have other JSON files you *do* want to commit, but want to ensure
 # credential JSON files specifically by name or in certain locations are ignored:
 # specific_credential_file.json

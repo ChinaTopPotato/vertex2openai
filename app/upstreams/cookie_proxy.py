@@ -43,6 +43,7 @@ from message_processing import (
 )
 from logger import stats
 from api_helpers import get_retry_settings
+from proxy_pool import current_proxy_url
 from signature_store import SignatureRecord, SignatureState, signature_store
 from schema_validation import SchemaValidationError, validate_request_schemas
 
@@ -1396,8 +1397,10 @@ class CookieProxyUpstream(BaseUpstream):
             "timeout": httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=10.0),
             "follow_redirects": True,
         }
-        if app_config.PROXY_URL:
-            client_kwargs["proxy"] = app_config.PROXY_URL
+        proxy_url = current_proxy_url() or app_config.PROXY_URL
+        if proxy_url:
+            client_kwargs["proxy"] = proxy_url
+            client_kwargs["trust_env"] = False
 
         # 重试配置（控制台可调）；语义与 Express 通道统一：总尝试次数 = retry_max + 1
         retry_max, backoff_sec = get_retry_settings()
