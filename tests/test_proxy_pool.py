@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.testclient import TestClient
 import httpx
 
-from proxy_subscription import parse_subscription, parse_node, SubscriptionError, subscription_url
+from proxy_subscription import MAX_NODES, parse_subscription, parse_node, SubscriptionError, subscription_url
 from proxy_pool import ProxyPool, current_proxy_url, register_request_cleanup
 
 TEST_UUID = "00000000-0000-4000-8000-000000000001"
@@ -76,6 +76,18 @@ class SubscriptionTests(unittest.TestCase):
                     node_uri("10.0.0.1"), node_uri(type="grpc"), node_uri(security="none")):
             with self.subTest(uri=uri), self.assertRaises(SubscriptionError):
                 parse_subscription(uri.encode())
+
+    def test_imports_expanded_587_node_subscription(self):
+        raw = "\n".join(node_uri(f"104.28.{i // 250}.{i % 250 + 1}") for i in range(587)).encode()
+        for content in (raw, base64.b64encode(raw)):
+            nodes, skipped = parse_subscription(content)
+            self.assertEqual(len(nodes), 587)
+            self.assertEqual(skipped, 0)
+
+    def test_rejects_subscription_over_node_limit(self):
+        raw = "\n".join(node_uri(f"104.28.{i // 250}.{i % 250 + 1}") for i in range(MAX_NODES + 1)).encode()
+        with self.assertRaises(SubscriptionError):
+            parse_subscription(raw)
 
     def test_invalid_subscription_links(self):
         for url in ("file:///etc/passwd", "http://example.com/sub", "https://localhost/sub",

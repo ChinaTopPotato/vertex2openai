@@ -12,7 +12,7 @@ import uuid
 from urllib.parse import parse_qs, unquote, urlsplit
 
 MAX_SUBSCRIPTION_BYTES = 4 * 1024 * 1024
-MAX_NODES = 512
+MAX_NODES = 1024
 
 
 class SubscriptionError(ValueError):
